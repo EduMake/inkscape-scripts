@@ -276,7 +276,6 @@ class MyEffect(inkex.Effect):
 #                inkex.errormsg(repr(p))
                 self.dxf_arc_transform(mat,cx,cy,rx,ry,a0,a1)
                 if len(simplep) > 2 and simplep[2][0] == 'L':
-                    inkex.errormsg("Closed")
                     pt2 = [simplep[0][1][0],simplep[0][1][1]]
                     pt0 = [simplep[1][1][5],simplep[1][1][6]]
                     pt1 = [simplep[2][1][0],simplep[2][1][1]]

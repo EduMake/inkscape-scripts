@@ -122,20 +122,31 @@ class MyEffect(inkex.Effect):
     def dxf_arc_transform(self,m,cx,cy,rx,ry,a0,a1):
         cp = [cx,cy]
         if rx >= ry:
-            # major axis vector is left
-            majaxisp = [cx + rx, cy]
+            # major axis vector points left
+            majaxisp = [cx - rx, cy]
             rmm = ry / rx
+
+            # angles in inkscape = cw from x axis;
+            # angles in dxf ccw from major axis
+            # major axis at Pi
+            # so invert and offset by Pi
+            a0 = math.pi - a0
+            a1 = math.pi - a1
         else:
             # major axis vector is up the page (-ve y in inkscape)
-            majaxisp = [cx, cy + ry]
+            majaxisp = [cx, cy - ry]
             rmm = rx / ry
-            # Offset our angle 90 deg clockwise (-ve 0 in inkscape)
-            a0 = a0 - math.pi / 2
-            a1 = a1 - math.pi / 2
-            if a0 < 0:
-                a0 = a0 + 2*math.pi
-            if a1 < 0:
-                a1 = a1 + 2*math.pi
+
+            # angles in inkscape = cw from x axis;
+            # angles in dxf ccw from major axis
+            # major axis at 3 * Pi / 2
+            # so invert and offset by 3 * Pi / 2
+            a0 = 3 * math.pi / 2 - a0
+            a1 = 3 * math.pi / 2 - a1
+
+        if ((a0 < 0) or (a1 < 0)):
+            a0 = a0 + 2 * math.pi
+            a1 = a1 + 2 * math.pi
         
         # apply transforms
         simpletransform.applyTransformToPoint(m,cp)
@@ -146,8 +157,6 @@ class MyEffect(inkex.Effect):
         majaxisp[1] = majaxisp[1] - cp[1]
 
         # reverse angles from inkscape cw to DXF ccw
-        a0 = 2*math.pi -a0 # % (math.pi*2)
-        a1 = 2*math.pi -a1 # % (math.pi*2)
         self.dxf_arc(cp,majaxisp,rmm,a1,a0)
         
     def LWPOLY_line(self,csp):
@@ -262,10 +271,20 @@ class MyEffect(inkex.Effect):
                 ry = float(node.get(inkex.addNS('ry','sodipodi')))
                 a0 = float(node.get(inkex.addNS('start','sodipodi'),0))
                 a1 = float(node.get(inkex.addNS('end','sodipodi'),2*math.pi))
-                inkex.errormsg(repr(simplep))
-                inkex.errormsg("cx=%f,cy=%f,rx=%f,ry=%f" % (float(node.get(inkex.addNS('cx','sodipodi'),0)),float(node.get(inkex.addNS('cy','sodipodi'),0)),float(node.get(inkex.addNS('rx','sodipodi'),0)),float(node.get(inkex.addNS('ry','sodipodi'),0))))
+#                inkex.errormsg(repr(simplep))
+#                inkex.errormsg("cx=%f,cy=%f,rx=%f,ry=%f" % (float(node.get(inkex.addNS('cx','sodipodi'),0)),float(node.get(inkex.addNS('cy','sodipodi'),0)),float(node.get(inkex.addNS('rx','sodipodi'),0)),float(node.get(inkex.addNS('ry','sodipodi'),0))))
 #                inkex.errormsg(repr(p))
                 self.dxf_arc_transform(mat,cx,cy,rx,ry,a0,a1)
+                if len(simplep) > 2 and simplep[2][0] == 'L':
+                    inkex.errormsg("Closed")
+                    pt2 = [simplep[0][1][0],simplep[0][1][1]]
+                    pt0 = [simplep[1][1][5],simplep[1][1][6]]
+                    pt1 = [simplep[2][1][0],simplep[2][1][1]]
+                    simpletransform.applyTransformToPoint(mat,pt0)
+                    simpletransform.applyTransformToPoint(mat,pt1)
+                    simpletransform.applyTransformToPoint(mat,pt2)
+                    self.dxf_line([pt0,pt1])
+                    self.dxf_line([pt1,pt2])
                 return
             elif (self.options.FLATTENBES):
                 cspsubdiv.cspsubdiv(p, self.options.flat)

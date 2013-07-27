@@ -73,7 +73,7 @@ class EllipseTestPattern(inkex.Effect):
 				for i1 in range(13):
 					for i2 in range(13):
 						if (i1 != i2) and ((i1 != 12) or (i2 != 0)):
-							draw_SVG_ellipse((40,10), (i2*90+675,i1*25 + o*350 - 350), parent, (i1*math.pi/6,i2*math.pi/6), o==1, 'rotate(%f)' % (i0*60))
+							draw_SVG_ellipse((40.0,10.0), (i2*90.0+675.0,i1*25.0 + o*350.0 - 350.0), parent, (i1*math.pi/6.0,i2*math.pi/6.0), o==1, 'rotate(%f)' % (i0*60.0))
 #							draw_SVG_text((40*2,10*2), (i2*90-40+675,i1*25 + o*350 -10 - 350), parent, "%d %d %d %d" % (i0, o, i1, i2), 'rotate(%f)' % (i0*60))
 #						else:
 #							draw_SVG_square((40*2,10*2), (i2*90-40+675,i1*25 + o*350 -10 - 350), parent, 'rotate(%f)' % (i0*60))
@@ -82,7 +82,7 @@ class EllipseTestPattern(inkex.Effect):
 				for i1 in range(13):
 					for i2 in range(13):
 						if (i1 != i2) and ((i1 != 12) or (i2 != 0)):
-							draw_SVG_ellipse((10,40), (i2*25+675+675+675,i1*90 + o*1400 - 350), parent, (i1*math.pi/6,i2*math.pi/6), o==1, 'rotate(%f)' % (i0*60))
+							draw_SVG_ellipse((10.0,40.0), (i2*25.0+675.0+675.0+675.0,i1*90.0 + o*1400.0 - 350.0), parent, (i1*math.pi/6.0,i2*math.pi/6.0), o==1, 'rotate(%f)' % (i0*60.0))
 #							draw_SVG_text((10*2,40*2), (i2*25-10+675+675+675,i1*90 + o*1400 -40 - 350), parent, "%d %d %d %d" % (i0, o, i1, i2), 'rotate(%f)' % (i0*60))
 #						else:
 #							draw_SVG_square((10*2,40*2), (i2*25-10+675+675+675,i1*90 + o*1400 -40 - 350), parent, 'rotate(%f)' % (i0*60))

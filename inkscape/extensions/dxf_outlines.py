@@ -67,6 +67,114 @@ def get_matrix(u, i, j):
     else:
         return 0
 
+def convert_arc_abrxry0_to_crxry00102(a, b, rx, ry, theta, largearc, sweep):
+    # Convert from degrees
+    theta_rads = radians(theta)
+
+    # Create Transforms to transform our ellipse to a unit circle and back:
+    T = matrix([[cos(theta_rads) / rx, sin(theta_rads) / rx],[-sin(theta_rads) / ry, cos(theta_rads) / ry]])
+    T_inv = T.I
+
+    # Create a position vector matrix of our two points
+    ab_vecs = matrix([[a[0],b[0]],[a[1],b[1]]])
+
+    # Transform to unit circle space:
+    ab_dash_vecs = T * ab_vecs
+
+    # Find the mid point:
+    am_vec = (ab_dash_vecs[:,1] - ab_dash_vecs[:,0]) * 0.5
+    am_x = am_vec[0,0]
+    am_y = am_vec[1,0]
+
+    # find the vector perpendicular to the line am.
+    # Depending on the sweep parameter, our centre is either one side or the other of the mid point
+    # and hence the perp is either positive or negative:
+    if sweep and largearc or not (sweep or largearc):
+        am_perp_vec = matrix([[am_y],[-am_x]])
+    else:
+        am_perp_vec = matrix([[-am_y],[am_x]])
+
+    # find the (square of) the length of the line am:
+    mag_am2 = am_x * am_x + am_y * am_y
+    # Use pythagorus to find distance to the centre:
+    tmp = 1.0 - mag_am2
+    if tmp < -0.001:
+        inkex.errormsg(_("Elipse conversion failed, Can't sqrt(%f). Possibly due to radii too small.") % (tmp))
+        inkex.sys.exit()
+    elif tmp < 0:
+        mag_mc = 0
+    else:
+        mag_mc = sqrt(tmp)
+
+    # Find the centre from point a, via the midpoint:
+    c = ab_dash_vecs[:,0] + am_vec + (mag_mc / sqrt(mag_am2)) * am_perp_vec
+
+    # Use inverse trig to find angles:
+
+    theta1 = math.acos(ab_dash_vecs[0,0]-c[0,0])
+    if ab_dash_vecs[1,0]-c[1,0] < 0.0:
+        theta1 = math.pi * 2 - theta1
+    theta2 = math.acos(ab_dash_vecs[0,1]-c[0,0])
+    if ab_dash_vecs[1,1]-c[1,0] < 0.0:
+        theta2 = math.pi * 2 - theta2
+
+    # correct for start and end angles for sweep direction:
+    if sweep:
+        if theta1 > theta2:
+            # the round is an ugly fudge because I was get some 'nearly but not quite'
+            if round(theta1 / math.pi,5) >= 2.0 :
+                theta1 = theta1 - 2*math.pi
+            else:
+                theta2 = theta2 + 2*math.pi
+    else:
+        if theta2 > theta1:
+            if round(theta2 / math.pi,5) >= 2.0 :
+                theta2  = theta2 - 2*math.pi
+            else:
+                theta1 = theta1 + 2*math.pi
+
+    # convert back to ellipse space and convert to point:
+    cpt = (T_inv * c).getA().ravel().tolist()
+
+    return [ cpt, rx, ry, theta, theta1, theta2 ];
+
+def split_arc_nonarc(simplep):
+    nonarcpath = []
+    arcpath = []
+    pos = []
+    start = []
+    broken = False
+    lastcmd = ''
+    for s in simplep:
+        cmd, params = s        
+        if cmd == 'M':
+            pos = params[:]
+            start = pos[:]
+            broken = False
+        elif cmd == 'A':
+            if lastcmd != 'A':
+                arcpath.append(['M', pos ])
+            arcpath.append(s[:])
+            pos = params[-2:]
+            broken = True
+        else:
+            if lastcmd == 'A' or lastcmd == 'M':
+                nonarcpath.append(['M', pos ])
+            if cmd == 'Z' or cmd == 'z':
+                if broken:
+                    if abs(pos[0]-start[0]) > 0.0001 or abs(pos[1]-start[1]) > 0.0001:
+                        nonarcpath.append(['L', start])
+                else:
+                    nonarcpath.append(s)
+                broken = False
+                pos = start
+            else:
+                nonarcpath.append(s)
+                pos = params[-2:]
+        lastcmd = cmd
+
+    return [nonarcpath,arcpath]    
+
 class MyEffect(inkex.Effect):
     def __init__(self):
         inkex.Effect.__init__(self)
@@ -119,30 +227,35 @@ class MyEffect(inkex.Effect):
         self.handle += 1
         self.dxf_add("  0\nELLIPSE\n  5\n%x\n100\nAcDbEntity\n  8\n%s\n 62\n%d\n100\nAcDbEllipse\n" % (self.handle, self.layer, self.color))
         self.dxf_add(" 10\n%f\n 20\n%f\n 30\n0.0\n 11\n%f\n 21\n%f\n 31\n0.0\n 40\n%f\n 41\n%f\n 42\n%f\n" % (cp[0],cp[1],maxisp[0],maxisp[1],rmm,a0,a1))
-    def dxf_arc_transform(self,m,cx,cy,rx,ry,a0,a1):
+    def dxf_arc_transform(self,m,cx,cy,rx,ry,abase,a0,a1):
         cp = [cx,cy]
+        abaserads = math.radians(abase)
         if rx >= ry:
+            abaserads = abaserads + math.pi
+            rmaj = rx
+            rmin = ry
             # major axis vector points left
-            majaxisp = [cx - rx, cy]
-            rmm = ry / rx
 
-            # angles in inkscape = cw from x axis;
+            # angles in inkscape = cw from elipse local x axis;
             # angles in dxf ccw from major axis
             # major axis at Pi
             # so invert and offset by Pi
             a0 = math.pi - a0
             a1 = math.pi - a1
         else:
+            abaserads = abaserads - math.pi / 2
+            rmaj = ry
+            rmin = rx
             # major axis vector is up the page (-ve y in inkscape)
-            majaxisp = [cx, cy - ry]
-            rmm = rx / ry
 
-            # angles in inkscape = cw from x axis;
+            # angles in inkscape = cw from elipse local x axis;
             # angles in dxf ccw from major axis
             # major axis at 3 * Pi / 2
             # so invert and offset by 3 * Pi / 2
             a0 = 3 * math.pi / 2 - a0
             a1 = 3 * math.pi / 2 - a1
+        rmm = rmin / rmaj
+        majaxisp = [cx + rmaj*cos(abaserads), cy + rmaj*sin(abaserads)]
 
         if ((a0 < 0) or (a1 < 0)):
             a0 = a0 + 2 * math.pi
@@ -241,6 +354,20 @@ class MyEffect(inkex.Effect):
             self.dxf_add(" 11\n%f\n 21\n%f\n 31\n0.0\n" % (self.xfit[i],self.yfit[i]))
 
     def process_shape(self, node, mat):
+        nodetype = node.get(inkex.addNS("type","sodipodi"))
+        if nodetype == "arc":
+            # These are actually only used for checking the maths
+            ui_arc = True
+            ui_cx = float(node.get(inkex.addNS('cx','sodipodi')))
+            ui_cy = float(node.get(inkex.addNS('cy','sodipodi')))
+            ui_r = float(node.get(inkex.addNS('r','sodipodi'),0.0))
+            ui_rx = float(node.get(inkex.addNS('rx','sodipodi'),ui_r))
+            ui_ry = float(node.get(inkex.addNS('ry','sodipodi'),ui_r))
+            ui_a0 = float(node.get(inkex.addNS('start','sodipodi'),0))
+            ui_a1 = float(node.get(inkex.addNS('end','sodipodi'),2*math.pi))
+        else:
+            ui_arc = False
+
         rgb = (0,0,0)
         style = node.get('style')
         if style:
@@ -259,75 +386,126 @@ class MyEffect(inkex.Effect):
         if node.tag == inkex.addNS('path','svg'):
             d = node.get('d')
             if not d:
+                inkex.errormsg("PATH DATA MISSING!")
+                inkex.sys.exit()
                 return
-            if (d[-1] == 'z' or d[-1] == 'Z'):
-                self.closed = 1
+            # Filter out any eliptical arcs for special treatment:
             simplep = simplepath.parsePath(d)
-            p = cubicsuperpath.CubicSuperPath(simplep)
-            if simplep[1][0] == 'A':
-                cx = float(node.get(inkex.addNS('cx','sodipodi')))
-                cy = float(node.get(inkex.addNS('cy','sodipodi')))
-                rx = float(node.get(inkex.addNS('rx','sodipodi')))
-                ry = float(node.get(inkex.addNS('ry','sodipodi')))
-                a0 = float(node.get(inkex.addNS('start','sodipodi'),0))
-                a1 = float(node.get(inkex.addNS('end','sodipodi'),2*math.pi))
-#                inkex.errormsg(repr(simplep))
-#                inkex.errormsg("cx=%f,cy=%f,rx=%f,ry=%f" % (float(node.get(inkex.addNS('cx','sodipodi'),0)),float(node.get(inkex.addNS('cy','sodipodi'),0)),float(node.get(inkex.addNS('rx','sodipodi'),0)),float(node.get(inkex.addNS('ry','sodipodi'),0))))
-#                inkex.errormsg(repr(p))
-                self.dxf_arc_transform(mat,cx,cy,rx,ry,a0,a1)
-                if len(simplep) > 2 and simplep[2][0] == 'L':
-                    pt2 = [simplep[0][1][0],simplep[0][1][1]]
-                    pt0 = [simplep[1][1][5],simplep[1][1][6]]
-                    pt1 = [simplep[2][1][0],simplep[2][1][1]]
-                    simpletransform.applyTransformToPoint(mat,pt0)
-                    simpletransform.applyTransformToPoint(mat,pt1)
-                    simpletransform.applyTransformToPoint(mat,pt2)
-                    self.dxf_line([pt0,pt1])
-                    self.dxf_line([pt1,pt2])
+            split = split_arc_nonarc(simplep)
+            arc_simplep = split[1]
+            simplep = split[0]
+            if len(simplep)>0:
+                if (simplep[-1][0] == 'z' or simplep[-1][0] == 'Z'):
+                    self.closed = 1
+                p = cubicsuperpath.CubicSuperPath(simplep)
+                if (self.options.FLATTENBES):
+                    cspsubdiv.cspsubdiv(p, self.options.flat)
+                    np = []
+                    for sp in p:
+                        first = True
+                        for csp in sp:
+                            cmd = 'L'
+                            if first:
+                                cmd = 'M'
+                            first = False
+                            np.append([cmd,[csp[1][0],csp[1][1]]])
+                    p = cubicsuperpath.parsePath(simplepath.formatPath(np))
+                simpletransform.applyTransformToPath(mat, p)
+                for sub in p:
+                    for i in range(len(sub)-1):
+                        s = sub[i]
+                        e = sub[i+1]
+                        if s[1] == s[2] and e[0] == e[1]:
+                            if (self.options.POLY == 'true'):
+                                self.LWPOLY_line([s[1],e[1]])
+                            else:
+                                self.dxf_line([s[1],e[1]])
+                        elif (self.options.ROBO == 'true'):
+                            self.ROBO_spline([s[1],s[2],e[0],e[1]])
+                        else:
+                            self.dxf_spline([s[1],s[2],e[0],e[1]])
+
+            # Now process any arc segments:
+
+            if len(arc_simplep) > 0:
+
+                # As our path is broken by arcs, we cannot have a closed polyline:
+                self.closed = 0
+
+                i = 0
+                while i < len(arc_simplep):
+                    cmd, params = arc_simplep[i]
+                    if cmd == 'M':
+                        p0 = params[:]
+                    else:
+                        p1 = params[-2:]
+                        rx,ry,theta,largearc,sweep = params[0:5]
+                        e_params = convert_arc_abrxry0_to_crxry00102(p0,p1,rx,ry,theta,largearc==1,sweep==1)
+                        cx,cy = e_params[0]
+                        if (i<len(arc_simplep)-1):
+                            cmd2, params2 = arc_simplep[i+1]
+                        else:
+                            cmd2 = '-'
+                        if cmd2 == 'A' and params2[0:5] == params[0:5] and params2[-2:] == p0:
+                            # complete circle or ellipse
+                            a0 = 0
+                            a1 = 2.0*math.pi
+                            i = i + 1
+                            p1 = p0
+                        else:
+                            a0 = e_params[4]
+                            a1 = e_params[5]
+                            p0 = p1
+                        self.dxf_arc_transform(mat,cx,cy,rx,ry,theta,a0,a1)
+                        # check did we get our maths right?
+                        if ui_arc and ((abs(cx - ui_cx) > 0.05) or (abs(cy - ui_cy) > 0.05) or (abs(a0 - ui_a0)>0.1) or (abs(a1 - ui_a1)>0.1)):
+                            inkex.errormsg("WARNING, Maths failure. Stored attributes of arc and calculated values do not agree!:")
+                            inkex.errormsg("sodipodi:\tc=[%f,%f],r=[%f,%f],a0=%fpi,a1=%fpi" % (ui_cx,ui_cy,ui_rx,ui_ry,ui_a0/math.pi,ui_a1/math.pi))
+                            inkex.errormsg("raw:\tc=[%f,%f],r=[%f,%f],a0=%fpi,a1=%fpi" % (cx,cy,rx,ry,a0/math.pi,a1/math.pi))
+                    i = i+1
+
                 return
-            elif (self.options.FLATTENBES):
-                cspsubdiv.cspsubdiv(p, self.options.flat)
-                np = []
-                for sp in p:
-                    first = True
-                    for csp in sp:
-                        cmd = 'L'
-                        if first:
-                            cmd = 'M'
-                        first = False
-                        np.append([cmd,[csp[1][0],csp[1][1]]])
-                p = cubicsuperpath.parsePath(simplepath.formatPath(np))
         elif node.tag in [ inkex.addNS('circle','svg'), 'circle', \
                             inkex.addNS('ellipse','svg'), 'ellipse' ]:
-                inkex.errormsg("non-arc ellipses and circles not yet implemented")
+                cx = float(node.get('cx',0))
+                cy = float(node.get('cy',0))
+                if node.tag == inkex.addNS('circle','svg'):
+                    rx = float(node.get('r',0))
+                    ry = rx
+                else:
+                    rx = float(node.get('rx',0))
+                    ry = float(node.get('ry',rx))
+                a0 = 0.0
+                a1 = 2*math.pi
+                self.dxf_arc_transform(mat,cx,cy,rx,ry,0,a0,a1)
+                return
         elif node.tag == inkex.addNS('rect','svg'):
             self.closed = 1
             x = float(node.get('x'))
             y = float(node.get('y'))
             width = float(node.get('width'))
             height = float(node.get('height'))
-            p = [[[x, y],[x, y],[x, y]]]
-            p.append([[x + width, y],[x + width, y],[x + width, y]])
-            p.append([[x + width, y + height],[x + width, y + height],[x + width, y + height]])
-            p.append([[x, y + height],[x, y + height],[x, y + height]])
-            p.append([[x, y],[x, y],[x, y]])
-            p = [p]
+            pt0 = [x,y]
+            pt1 = [x + width, y]
+            pt2 = [x + width, y + height]
+            pt3 = [x, y + height]
+            simpletransform.applyTransformToPoint(mat,pt0)
+            simpletransform.applyTransformToPoint(mat,pt1)
+            simpletransform.applyTransformToPoint(mat,pt2)
+            simpletransform.applyTransformToPoint(mat,pt3)
+            if (self.options.POLY == 'true'):
+                self.LWPOLY_line([pt0,pt1])
+                self.LWPOLY_line([pt1,pt2])
+                self.LWPOLY_line([pt2,pt3])
+                self.LWPOLY_line([pt3,pt0])
+            else:
+                self.dxf_line([pt0,pt1])
+                self.dxf_line([pt1,pt2])
+                self.dxf_line([pt2,pt3])
+                self.dxf_line([pt3,pt0])
+            return
         else:
             return
-        simpletransform.applyTransformToPath(mat, p)
-        for sub in p:
-            for i in range(len(sub)-1):
-                s = sub[i]
-                e = sub[i+1]
-                if s[1] == s[2] and e[0] == e[1]:
-                    if (self.options.POLY == 'true'):
-                        self.LWPOLY_line([s[1],e[1]])
-                    else:
-                        self.dxf_line([s[1],e[1]])
-                elif (self.options.ROBO == 'true'):
-                    self.ROBO_spline([s[1],s[2],e[0],e[1]])
-                else:
-                    self.dxf_spline([s[1],s[2],e[0],e[1]])
 
     def process_clone(self, node):
         trans = node.get('transform')
